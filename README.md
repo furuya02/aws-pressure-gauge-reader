@@ -1,29 +1,43 @@
-# Pressure Gauge Detection with Bedrock Agent
+# AWS Pressure Gauge Reader
 
-圧力計メーター針をYOLOv8で検出し、Bedrock Agent (Claude Sonnet 4.5) でマルチモーダル解析を行うシステムのCDKプロジェクトです。
+圧力計メーター針をYOLOv8で検出し、Claude Sonnet 4.5 (AWS Bedrock) で画像解析を行う自動読み取りシステムです。
+
+## 特徴
+
+- 🎯 **YOLOv8セグメンテーション**: 圧力計の針を高精度で検出
+- 🤖 **Claude Sonnet 4.5**: AWS Bedrockを使用したAI画像解析
+- ☁️ **サーバーレス**: AWS Lambdaでの完全サーバーレス実装
+- 🐳 **Dockerコンテナ**: 10GBまでのモデルをサポート
+- 📊 **前処理画像の返却**: AI解析結果と前処理済み画像の両方を取得可能
 
 ## アーキテクチャ
 
 ```
-ユーザー
-  ↓ 画像 + テキスト指示
-Bedrock Agent (Claude Sonnet 4.5)
-  ↓ detect-gaugeアクション呼び出し
-Lambda関数（YOLO針検出）
-  ↓ 針を強調した画像を返す
-Bedrock Agent
-  ↓ 強調画像をLLMに渡して解析
-  ↓ メーター値を読み取り
-ユーザーへ結果を返す
+Client (test.py)
+  ↓ {"image": "base64...", "text": "..."}
+Lambda関数 (us-east-1)
+  ├─ YOLO前処理（針を赤色で強調）
+  └─ Bedrock LLM呼び出し（Claude Sonnet 4.5）
+  ↓ {"llmResponse": "...", "processedImage": "base64...", "yoloMessage": "..."}
+Client
+  ├─ LLM回答を表示
+  └─ 前処理済み画像を保存
 ```
+
+### なぜBedrock Agentを使わないのか？
+
+詳細は [`docs/why-not-bedrock-agent.md`](docs/why-not-bedrock-agent.md) を参照してください。
+
+**主な理由:**
+1. **画像連携の制約**: `sessionState.files` はAction Groupに画像を渡せない
+2. **非効率性**: 単一アクションではAgentのオーバーヘッド（約1.3秒）が無駄
+3. **シンプルさ**: Lambda直接呼び出しの方が理解しやすく、デバッグも容易
 
 ## 構成要素
 
-- **Lambda関数**: YOLOv8による圧力計針のセグメンテーション（コンテナイメージ形式）
+- **Lambda関数**: YOLOv8による針検出 + Claude Sonnet 4.5による解析（コンテナイメージ形式）
 - **ECRリポジトリ**: Dockerイメージの保存
-- **Bedrock Agent**: Claude Sonnet 4.5を使用した画像解析エージェント
-- **IAMロール**: Lambda実行ロール、Bedrock Agent実行ロール
-- **Action Group**: Lambda関数を呼び出すBedrock Agent Action
+- **IAMロール**: Lambda実行ロール（Bedrock呼び出し権限を含む）
 
 ## 前提条件
 
@@ -37,80 +51,112 @@ Bedrock Agent
 
 ### 1. 依存パッケージのインストール
 
-\`\`\`bash
+```bash
 cd cdk
-pnpm install
-\`\`\`
+npm install
+```
 
 ### 2. AWS認証情報の設定
 
-\`\`\`bash
+```bash
 aws configure
 # または環境変数を設定
 export AWS_ACCESS_KEY_ID=...
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_DEFAULT_REGION=us-east-1
-\`\`\`
+```
 
 ### 3. CDKのブートストラップ（初回のみ）
 
-\`\`\`bash
-pnpm exec cdk bootstrap aws://ACCOUNT-ID/us-east-1
-\`\`\`
+```bash
+npx cdk bootstrap aws://<YOUR_AWS_ACCOUNT_ID>/us-east-1
+```
 
 ## デプロイ
 
 ### 1. CDK Synthで検証
 
-\`\`\`bash
-pnpm exec cdk synth
-\`\`\`
+```bash
+npx cdk synth
+```
 
 ### 2. デプロイ実行
 
-\`\`\`bash
-pnpm exec cdk deploy
-\`\`\`
+```bash
+npx cdk deploy
+```
 
 **注意**: 初回デプロイ時は、Dockerイメージのビルドに時間がかかります（10-20分程度）。
 
 デプロイが完了すると、以下の情報が出力されます:
-- \`ECRRepositoryUri\`: ECRリポジトリのURI
-- \`LambdaFunctionName\`: Lambda関数名
-- \`LambdaFunctionArn\`: Lambda関数のARN
-- \`BedrockAgentId\`: Bedrock AgentのID
-- \`BedrockAgentArn\`: Bedrock AgentのARN
-- \`BedrockAgentAliasId\`: Bedrock Agent AliasのID
+- `ECRRepositoryUri`: ECRリポジトリのURI
+- `LambdaFunctionName`: Lambda関数名（デフォルト: `pressure-gauge-detection`）
+- `LambdaFunctionArn`: Lambda関数のARN
 
 ## 使用方法
 
-### AWS Console経由
+### テストスクリプト経由（推奨）
 
-1. AWS Consoleで **Amazon Bedrock** サービスを開く
-2. 左メニューから **Agents** を選択
-3. \`pressure-gauge-agent\` を選択
-4. **Test** タブを開く
-5. 圧力計の画像をアップロードして、「この圧力計のメーターを読み取ってください」と入力
-6. Agentが画像を解析して結果を返す
+```bash
+cd scripts
+
+# 仮想環境を作成
+python3 -m venv venv
+
+# 仮想環境を有効化
+source venv/bin/activate  # macOS/Linux
+# または
+venv\Scripts\activate  # Windows
+
+# 依存パッケージをインストール
+pip install -r requirements.txt
+
+# テスト実行
+python test.py ../sample_images/0001.png
+```
+
+**出力例:**
+```
+[YOLO処理] 針検出成功: 1個の針を検出しました
+
+[LLM解析結果]
+--------------------------------------------------------------------------------
+この圧力計の針は **約0.05 MPa** を指しています。
+
+針は0と0.2の間の、0に近い位置を示しており、目盛りから判断すると
+**0.05 MPa前後** の値を示していると読み取れます。
+--------------------------------------------------------------------------------
+
+[INFO] 前処理済み画像を保存中: output/0001_processed.png
+[SUCCESS] テストが完了しました
+```
 
 ### AWS CLI経由
 
-\`\`\`bash
-aws bedrock-agent-runtime invoke-agent \\
-  --agent-id <AGENT_ID> \\
-  --agent-alias-id <ALIAS_ID> \\
-  --session-id test-session-1 \\
-  --input-text "この圧力計のメーターを読み取ってください" \\
-  --region us-east-1 \\
+```bash
+# ペイロードを準備
+echo '{
+  "image": "'"$(base64 -i sample_images/0001.png)"'",
+  "text": "この圧力計のメーターを読み取ってください"
+}' > payload.json
+
+# Lambda関数を呼び出し
+aws lambda invoke \
+  --function-name pressure-gauge-detection \
+  --payload file://payload.json \
+  --region us-east-1 \
   output.json
-\`\`\`
+
+# 結果を確認
+cat output.json | jq -r '.body | fromjson | .llmResponse'
+```
 
 ## デプロイ後の設定
 
 ### Bedrock Model Accessの有効化
 
 1. AWS Console → Amazon Bedrock → Model access
-2. Claude Sonnet 4.5 (anthropic.claude-sonnet-4-20250514-v1:0) を選択
+2. **Claude Sonnet 4.5** (`us.anthropic.claude-sonnet-4-5-20250929-v1:0`) を選択
 3. **Request access** をクリック
 4. 承認されるまで待機（通常は即座に承認される）
 
@@ -118,41 +164,98 @@ aws bedrock-agent-runtime invoke-agent \\
 
 ### デプロイエラー: Bedrock Model Accessがない
 
-\`\`\`
-Error: Model access not granted for anthropic.claude-sonnet-4-20250514-v1:0
-\`\`\`
+```
+Error: AccessDeniedException
+```
 
 **解決方法:**
 上記の「Bedrock Model Accessの有効化」を実施してください。
 
 ### Dockerビルドエラー
 
-\`\`\`
+```
 Error: Docker build failed
-\`\`\`
+```
 
 **解決方法:**
 1. Dockerが起動していることを確認
-2. \`lambda/best.pt\`が存在することを確認（約6.7MB）
+2. `cdk/lambda/best.pt`が存在することを確認（約6.7MB）
 3. ディスク容量を確認
+
+### リージョンエラー
+
+```
+Error: us-east-2 への accessDeniedException
+```
+
+**解決方法:**
+- Lambda環境変数 `BEDROCK_REGION=us-east-1` が設定されていることを確認
+- IAMポリシーで全リージョンのワイルドカード（`arn:aws:bedrock:*::...`）が許可されていることを確認
+- 詳細は [`docs/claude-sonnet-4.5-on-cdk.md`](docs/claude-sonnet-4.5-on-cdk.md) を参照
 
 ## クリーンアップ
 
 すべてのリソースを削除する場合:
 
-\`\`\`bash
-pnpm exec cdk destroy
-\`\`\`
+```bash
+npx cdk destroy
+```
 
-**注意**: ECRリポジトリ内の画像も自動削除されます（\`autoDeleteImages: true\`設定のため）。
+**注意**: ECRリポジトリ内の画像も自動削除されます（`autoDeleteImages: true`設定のため）。
 
 ## コスト
 
 主なコスト要素:
-- **Lambda実行**: メモリ3GB × 実行時間
+- **Lambda実行**: メモリ3GB × 実行時間（約2-5秒）
 - **ECRストレージ**: Dockerイメージサイズ（約1.5GB）
-- **Bedrock Agent**: Claude Sonnet 4.5の使用量（入力・出力トークン数）
+- **Bedrock**: Claude Sonnet 4.5の使用量（入力・出力トークン数）
+
+**概算（月100回実行の場合）:**
+- Lambda: ~$0.50
+- ECR: ~$0.15
+- Bedrock: ~$2.00
+- **合計: 約 $2.65/月**
+
+## 技術ドキュメント
+
+詳細な技術情報は [`docs/`](docs/) ディレクトリを参照してください:
+
+- **[Lambda機械学習実装ガイド](docs/lambda-ml-implementation-guide.md)**: Docker vs Lambda Layer、パフォーマンス最適化、トラブルシューティング
+- **[Claude Sonnet 4.5利用ガイド](docs/claude-sonnet-4.5-on-cdk.md)**: CDK制約、Inference Profile、IAMポリシー設定
+- **[Bedrock Agent不使用の理由](docs/why-not-bedrock-agent.md)**: アーキテクチャ選択の詳細な理由
+- **[Bedrock Agent画像連携の制約](docs/bedrock-agent-image-limitation.md)**: sessionState.filesの試行錯誤の全記録
+
+## プロジェクト構成
+
+```
+.
+├── cdk/                          # AWS CDKプロジェクト
+│   ├── bin/                      # CDKエントリーポイント
+│   ├── lib/                      # CDKスタック定義
+│   └── lambda/                   # Lambda関数コード
+│       ├── Dockerfile            # コンテナイメージ定義
+│       ├── lambda_function.py    # Lambda関数ハンドラー
+│       ├── yolo_processor.py     # YOLO処理ロジック
+│       ├── best.pt               # YOLOv8モデル（6.7MB）
+│       └── requirements.txt      # Python依存パッケージ
+├── docs/                         # 技術ドキュメント
+├── scripts/                      # テストスクリプト
+│   ├── test.py                   # Lambda動作確認スクリプト
+│   └── requirements.txt          # Python依存パッケージ
+└── sample_images/                # サンプル画像
+```
 
 ## ライセンス
 
-元のプログラムのライセンスに準拠します。
+MIT License
+
+## 貢献
+
+Issue や Pull Request を歓迎します。
+
+## 参考リンク
+
+- [AWS Lambda Documentation](https://docs.aws.amazon.com/lambda/)
+- [AWS Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
+- [YOLOv8 Documentation](https://docs.ultralytics.com/)
+- [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/)
