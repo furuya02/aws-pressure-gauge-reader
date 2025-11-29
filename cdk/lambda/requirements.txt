@@ -1,0 +1,17 @@
+# AWS Lambda用依存パッケージ
+# Python 3.11
+
+# YOLO (Ultralytics)
+ultralytics>=8.0.0
+
+# OpenCV (headless版 - GUI不要)
+opencv-python-headless>=4.8.0
+
+# 画像処理
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# PyTorch (CPU版 - Lambda環境用)
+# Note: Dockerfileでインストールするため、ここではコメントアウト
+# torch>=2.0.0
+# torchvision>=0.15.0

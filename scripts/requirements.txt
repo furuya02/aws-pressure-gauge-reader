@@ -1,0 +1,5 @@
+# AWS SDK for Python
+boto3>=1.35.0
+
+# For ClientError exception handling
+botocore>=1.35.0
