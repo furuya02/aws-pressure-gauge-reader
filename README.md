@@ -14,9 +14,9 @@
 
 ```
 Client (test.py)
-  ↓ {"image": "base64...", "text": "..."}
+  ↓ {"image": "base64...", "userPrompt": "...", "systemPrompt": "...", "preprocessImage": true/false}
 Lambda関数 (us-east-1)
-  ├─ YOLO前処理（針を赤色で強調）
+  ├─ YOLO前処理（針を赤色で強調）- optional
   └─ Bedrock LLM呼び出し（Claude Sonnet 4.5）
   ↓ {"llmResponse": "...", "processedImage": "base64...", "yoloMessage": "..."}
 Client
@@ -26,7 +26,7 @@ Client
 
 ### なぜBedrock Agentを使わないのか？
 
-詳細は [`docs/why-not-bedrock-agent.md`](docs/why-not-bedrock-agent.md) を参照してください。
+詳細は [CLAUDE.md](CLAUDE.md) および [docs/01_architecture/01_why-not-bedrock-agent.md](docs/01_architecture/01_why-not-bedrock-agent.md) を参照してください。
 
 **主な理由:**
 1. **画像連携の制約**: `sessionState.files` はAction Groupに画像を渡せない
@@ -95,6 +95,15 @@ npx cdk deploy
 
 ## 使用方法
 
+### プロンプトファイルの準備
+
+テストスクリプトは、`scripts/`ディレクトリにある以下のプロンプトファイルを使用します：
+
+- **user_prompt.txt**: ユーザープロンプト（LLMへの質問内容）
+- **system_prompt.txt**: システムプロンプト（LLMの役割・振る舞いの定義）
+
+これらのファイルは自由に編集可能です。詳細は [scripts/README.md](scripts/README.md#プロンプトファイル) を参照してください。
+
 ### テストスクリプト経由（推奨）
 
 ```bash
@@ -137,7 +146,9 @@ python test.py ../sample_images/0001.png
 # ペイロードを準備
 echo '{
   "image": "'"$(base64 -i sample_images/0001.png)"'",
-  "text": "この圧力計のメーターを読み取ってください"
+  "userPrompt": "この圧力計を読み取ってください。",
+  "systemPrompt": "あなたは圧力計の画像から正確な数値を読み取る専門家です。画像を慎重に観察して、針の位置を正確に読み取ってください。",
+  "preprocessImage": true
 }' > payload.json
 
 # Lambda関数を呼び出し
@@ -149,6 +160,14 @@ aws lambda invoke \
 
 # 結果を確認
 cat output.json | jq -r '.body | fromjson | .llmResponse'
+
+# 前処理をスキップする場合（オリジナル画像をそのままLLMに送信）
+echo '{
+  "image": "'"$(base64 -i sample_images/0001.png)"'",
+  "userPrompt": "この圧力計を読み取ってください。",
+  "systemPrompt": "あなたは圧力計の画像から正確な数値を読み取る専門家です。",
+  "preprocessImage": false
+}' > payload.json
 ```
 
 ## デプロイ後の設定
@@ -191,7 +210,7 @@ Error: us-east-2 への accessDeniedException
 **解決方法:**
 - Lambda環境変数 `BEDROCK_REGION=us-east-1` が設定されていることを確認
 - IAMポリシーで全リージョンのワイルドカード（`arn:aws:bedrock:*::...`）が許可されていることを確認
-- 詳細は [`docs/claude-sonnet-4.5-on-cdk.md`](docs/claude-sonnet-4.5-on-cdk.md) を参照
+- 詳細は [docs/02_implementation/02_claude-sonnet-4.5-on-cdk.md](docs/02_implementation/02_claude-sonnet-4.5-on-cdk.md) を参照
 
 ## クリーンアップ
 
@@ -218,12 +237,17 @@ npx cdk destroy
 
 ## 技術ドキュメント
 
-詳細な技術情報は [`docs/`](docs/) ディレクトリを参照してください:
+開発者向けの詳細情報は [CLAUDE.md](CLAUDE.md) を参照してください。
 
-- **[Lambda機械学習実装ガイド](docs/lambda-ml-implementation-guide.md)**: Docker vs Lambda Layer、パフォーマンス最適化、トラブルシューティング
-- **[Claude Sonnet 4.5利用ガイド](docs/claude-sonnet-4.5-on-cdk.md)**: CDK制約、Inference Profile、IAMポリシー設定
-- **[Bedrock Agent不使用の理由](docs/why-not-bedrock-agent.md)**: アーキテクチャ選択の詳細な理由
-- **[Bedrock Agent画像連携の制約](docs/bedrock-agent-image-limitation.md)**: sessionState.filesの試行錯誤の全記録
+詳細な技術情報は [docs/](docs/) ディレクトリを参照してください:
+
+### アーキテクチャ設計
+- **[Bedrock Agent不使用の理由](docs/01_architecture/01_why-not-bedrock-agent.md)**: アーキテクチャ選択の詳細な理由
+- **[Bedrock Agent画像連携の制約](docs/01_architecture/02_bedrock-agent-image-limitation.md)**: sessionState.filesの試行錯誤の全記録
+
+### 実装ガイド
+- **[Lambda機械学習実装ガイド](docs/02_implementation/01_lambda-ml-implementation-guide.md)**: Docker vs Lambda Layer、パフォーマンス最適化、トラブルシューティング
+- **[Claude Sonnet 4.5利用ガイド](docs/02_implementation/02_claude-sonnet-4.5-on-cdk.md)**: CDK制約、Inference Profile、IAMポリシー設定
 
 ## プロジェクト構成
 
@@ -241,6 +265,8 @@ npx cdk destroy
 ├── docs/                         # 技術ドキュメント
 ├── scripts/                      # テストスクリプト
 │   ├── test.py                   # Lambda動作確認スクリプト
+│   ├── user_prompt.txt           # ユーザープロンプト
+│   ├── system_prompt.txt         # システムプロンプト
 │   └── requirements.txt          # Python依存パッケージ
 └── sample_images/                # サンプル画像
 ```

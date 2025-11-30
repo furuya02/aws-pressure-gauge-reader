@@ -129,7 +129,8 @@ def encode_image_to_base64(image: np.ndarray, format: str = "PNG") -> str:
 def invoke_bedrock_model(
     client,
     processed_image_base64: str,
-    user_text: str,
+    user_prompt: str,
+    system_prompt: str = None,
     model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 ) -> str:
     """
@@ -138,7 +139,8 @@ def invoke_bedrock_model(
     Args:
         client: Bedrock Runtimeクライアント
         processed_image_base64: 前処理済み画像のBase64文字列
-        user_text: ユーザーからの質問テキスト
+        user_prompt: ユーザープロンプト
+        system_prompt: システムプロンプト（オプション）
         model_id: 使用するモデルID
 
     Returns:
@@ -162,15 +164,20 @@ def invoke_bedrock_model(
                     },
                     {
                         "type": "text",
-                        "text": user_text
+                        "text": user_prompt
                     }
                 ]
             }
         ]
     }
 
+    # システムプロンプトが指定されている場合は追加
+    if system_prompt:
+        request_body["system"] = system_prompt
+
     print(f"Calling Bedrock model: {model_id}")
-    print(f"User text: {user_text}")
+    print(f"System prompt: {system_prompt[:50] if system_prompt else 'None'}...")
+    print(f"User prompt: {user_prompt[:50]}...")
 
     # Bedrock APIを呼び出し
     response = client.invoke_model(
@@ -195,7 +202,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         event: Lambdaイベント
             {
                 "image": "base64エンコードされた画像",
-                "text": "ユーザーからの質問テキスト"
+                "userPrompt": "ユーザープロンプト",
+                "systemPrompt": "システムプロンプト（オプション）",
+                "preprocessImage": true/false（オプション、デフォルト: true）
             }
         context: Lambda実行コンテキスト
 
@@ -214,7 +223,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         print(f"Event keys: {event.keys()}")
 
         # プロセッサーとBedrockクライアントを初期化（初回のみ）
-        proc = initialize_processor()
         bedrock = initialize_bedrock_client()
 
         # 入力パラメータを取得
@@ -226,37 +234,56 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 })
             }
 
-        if "text" not in event:
+        if "userPrompt" not in event:
             return {
                 "statusCode": 400,
                 "body": json.dumps({
-                    "error": "入力パラメータ 'text' が必要です"
+                    "error": "入力パラメータ 'userPrompt' が必要です"
                 })
             }
 
         image_base64 = event["image"]
-        user_text = event["text"]
+        user_prompt = event["userPrompt"]
+        system_prompt = event.get("systemPrompt")  # オプション
+        preprocess_image = event.get("preprocessImage", True)  # オプション、デフォルト: True
+
+        print(f"Preprocess image: {preprocess_image}")
 
         # Base64デコード
         print("Decoding base64 image...")
         image = decode_base64_image(image_base64)
         print(f"Image shape: {image.shape}")
 
-        # YOLO画像処理（triangle固定）
-        print("Processing image with YOLO...")
-        processed_image, yolo_message = proc.process_image(image)
-        print(f"YOLO processing result: {yolo_message}")
+        # 前処理の有無を判定
+        if preprocess_image:
+            # プロセッサーを初期化（前処理する場合のみ）
+            proc = initialize_processor()
 
-        # 前処理済み画像をBase64エンコード
-        print("Encoding processed image to base64...")
-        processed_image_base64 = encode_image_to_base64(processed_image)
+            # YOLO画像処理（triangle固定）
+            print("Processing image with YOLO...")
+            processed_image, yolo_message = proc.process_image(image)
+            print(f"YOLO processing result: {yolo_message}")
+
+            # 前処理済み画像をBase64エンコード
+            print("Encoding processed image to base64...")
+            processed_image_base64 = encode_image_to_base64(processed_image)
+        else:
+            # 前処理をスキップ
+            print("Skipping YOLO preprocessing...")
+            processed_image = image
+            yolo_message = "前処理をスキップしました"
+
+            # オリジナル画像をBase64エンコード
+            print("Encoding original image to base64...")
+            processed_image_base64 = encode_image_to_base64(processed_image)
 
         # Bedrock LLMを呼び出し
         print("Invoking Bedrock LLM...")
         llm_response = invoke_bedrock_model(
             client=bedrock,
             processed_image_base64=processed_image_base64,
-            user_text=user_text
+            user_prompt=user_prompt,
+            system_prompt=system_prompt
         )
 
         # レスポンスを返す

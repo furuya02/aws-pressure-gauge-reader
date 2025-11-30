@@ -43,10 +43,26 @@ def save_base64_image(base64_string: str, output_path: Path) -> None:
         f.write(image_data)
 
 
+def load_prompt_file(prompt_path: Path) -> str:
+    """
+    プロンプトファイルを読み込む
+
+    Args:
+        prompt_path: プロンプトファイルパス
+
+    Returns:
+        プロンプトテキスト
+    """
+    with open(prompt_path, 'r', encoding='utf-8') as f:
+        return f.read().strip()
+
+
 def invoke_lambda_function(
     function_name: str,
     image_base64: str,
-    text: str,
+    user_prompt: str,
+    system_prompt: str,
+    preprocess_image: bool = True,
     region: str = 'us-east-1'
 ) -> Dict[str, Any]:
     """
@@ -55,7 +71,9 @@ def invoke_lambda_function(
     Args:
         function_name: Lambda関数名
         image_base64: base64エンコードされた画像
-        text: ユーザーからの質問テキスト
+        user_prompt: ユーザープロンプト
+        system_prompt: システムプロンプト
+        preprocess_image: 画像を前処理するかどうか（デフォルト: True）
         region: AWSリージョン
 
     Returns:
@@ -66,14 +84,18 @@ def invoke_lambda_function(
     print(f"[INFO] Lambda関数を呼び出し中...")
     print(f"[INFO] Function Name: {function_name}")
     print(f"[INFO] Region: {region}")
-    print(f"[INFO] Input Text: {text}")
+    print(f"[INFO] Preprocess Image: {preprocess_image}")
+    print(f"[INFO] System Prompt: {system_prompt[:50]}..." if len(system_prompt) > 50 else f"[INFO] System Prompt: {system_prompt}")
+    print(f"[INFO] User Prompt: {user_prompt[:50]}..." if len(user_prompt) > 50 else f"[INFO] User Prompt: {user_prompt}")
     print(f"[INFO] Image Size: {len(image_base64)} characters (base64)")
     print()
 
     # Lambda呼び出しペイロードを構築
     payload = {
         'image': image_base64,
-        'text': text
+        'userPrompt': user_prompt,
+        'systemPrompt': system_prompt,
+        'preprocessImage': preprocess_image
     }
 
     try:
@@ -126,12 +148,6 @@ def main() -> int:
         help='Lambda関数名（デフォルト: pressure-gauge-detection）'
     )
     parser.add_argument(
-        '--text',
-        type=str,
-        default='この圧力計のメーターを読み取ってください。針が指している値を教えてください。',
-        help='解析リクエストテキスト'
-    )
-    parser.add_argument(
         '--output-dir',
         type=Path,
         default=Path(__file__).parent / 'output',
@@ -143,12 +159,38 @@ def main() -> int:
         default='us-east-1',
         help='AWSリージョン（デフォルト: us-east-1）'
     )
+    parser.add_argument(
+        '--user-prompt',
+        type=Path,
+        default=Path(__file__).parent / 'user_prompt.txt',
+        help='ユーザープロンプトファイル（デフォルト: ./user_prompt.txt）'
+    )
+    parser.add_argument(
+        '--system-prompt',
+        type=Path,
+        default=Path(__file__).parent / 'system_prompt.txt',
+        help='システムプロンプトファイル（デフォルト: ./system_prompt.txt）'
+    )
+    parser.add_argument(
+        '--no-preprocess',
+        action='store_true',
+        help='画像の前処理をスキップする（デフォルト: 前処理あり）'
+    )
 
     args = parser.parse_args()
 
     # 画像ファイルの存在確認
     if not args.image_path.exists():
         print(f"[ERROR] 画像ファイルが見つかりません: {args.image_path}", file=sys.stderr)
+        return 1
+
+    # プロンプトファイルの存在確認
+    if not args.user_prompt.exists():
+        print(f"[ERROR] ユーザープロンプトファイルが見つかりません: {args.user_prompt}", file=sys.stderr)
+        return 1
+
+    if not args.system_prompt.exists():
+        print(f"[ERROR] システムプロンプトファイルが見つかりません: {args.system_prompt}", file=sys.stderr)
         return 1
 
     # 出力ディレクトリの作成
@@ -158,6 +200,9 @@ def main() -> int:
     print("圧力計メーター読み取りシステム 動作確認スクリプト")
     print("=" * 80)
     print(f"[INFO] 入力画像: {args.image_path}")
+    print(f"[INFO] ユーザープロンプト: {args.user_prompt}")
+    print(f"[INFO] システムプロンプト: {args.system_prompt}")
+    print(f"[INFO] 画像前処理: {'スキップ' if args.no_preprocess else '実行'}")
     print(f"[INFO] 出力ディレクトリ: {args.output_dir}")
     print()
 
@@ -168,11 +213,21 @@ def main() -> int:
         print(f"[INFO] 読み込み完了（base64サイズ: {len(image_base64)} characters）")
         print()
 
+        # プロンプトファイルを読み込み
+        print("[INFO] プロンプトファイルを読み込み中...")
+        user_prompt = load_prompt_file(args.user_prompt)
+        system_prompt = load_prompt_file(args.system_prompt)
+        print(f"[INFO] ユーザープロンプト読み込み完了（{len(user_prompt)} characters）")
+        print(f"[INFO] システムプロンプト読み込み完了（{len(system_prompt)} characters）")
+        print()
+
         # Lambda関数を呼び出し
         result = invoke_lambda_function(
             function_name=args.function_name,
             image_base64=image_base64,
-            text=args.text,
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            preprocess_image=not args.no_preprocess,  # --no-preprocessが指定されていない場合はTrue
             region=args.region
         )
 

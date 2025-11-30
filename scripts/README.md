@@ -13,9 +13,9 @@
 
 ```
 Client (test.py)
-  ↓ {"image": "base64...", "text": "..."}
+  ↓ {"image": "base64...", "userPrompt": "...", "systemPrompt": "...", "preprocessImage": true/false}
 Lambda (us-east-1)
-  ├─ YOLO前処理（針を赤色で強調）
+  ├─ YOLO前処理（針を赤色で強調）- optional
   └─ Bedrock LLM呼び出し（Claude Sonnet 4.5）
   ↓ {"llmResponse": "...", "processedImage": "base64...", "yoloMessage": "..."}
 Client
@@ -58,6 +58,30 @@ Client
    ```
    デプロイ時に出力される `LambdaFunctionName` をメモしてください（デフォルト: `pressure-gauge-detection`）
 
+## プロンプトファイル
+
+システムには2つのプロンプトファイルが用意されています：
+
+### user_prompt.txt
+
+ユーザープロンプト（LLMへの質問内容）を定義します。
+
+**デフォルト内容:**
+```
+User: この圧力計を読み取ってください。
+```
+
+### system_prompt.txt
+
+システムプロンプト（LLMの役割・振る舞いの定義）を定義します。
+
+**デフォルト内容:**
+```
+あなたは圧力計の画像から正確な数値を読み取る専門家です。画像を慎重に観察して、針の位置を正確に読み取ってください。
+```
+
+これらのファイルは自由に編集して、用途に応じたプロンプトをカスタマイズできます。
+
 ## スクリプト
 
 ### test.py
@@ -69,7 +93,9 @@ Lambda関数を直接呼び出して、YOLO前処理 + Bedrock LLM解析を実�
 ```bash
 python test.py <画像パス> \
   [--function-name pressure-gauge-detection] \
-  [--text "この圧力計のメーターを読み取ってください。針が指している値を教えてください。"] \
+  [--user-prompt ./user_prompt.txt] \
+  [--system-prompt ./system_prompt.txt] \
+  [--no-preprocess] \
   [--output-dir ./output] \
   [--region us-east-1]
 ```
@@ -81,15 +107,19 @@ python test.py <画像パス> \
 source venv/bin/activate  # macOS/Linux
 # または venv\Scripts\activate  # Windows
 
-# sample_images/0001.pngをテスト
+# sample_images/0001.pngをテスト（デフォルトのプロンプトファイルを使用）
 python test.py ../sample_images/0001.png
 
-# カスタムテキストで実行
+# カスタムプロンプトファイルを指定
 python test.py ../sample_images/0002.png \
-  --text "針が指している圧力値を正確に教えてください"
+  --user-prompt ./my_user_prompt.txt \
+  --system-prompt ./my_system_prompt.txt
+
+# YOLO前処理をスキップ（オリジナル画像をそのままLLMに送信）
+python test.py ../sample_images/0003.png --no-preprocess
 
 # 別のLambda関数名を指定
-python test.py ../sample_images/0003.png \
+python test.py ../sample_images/0004.png \
   --function-name my-custom-function
 ```
 
@@ -99,7 +129,9 @@ python test.py ../sample_images/0003.png \
 |------|------|-----------|------|
 | `image_path` | ✓ | - | テスト対象の画像ファイルパス |
 | `--function-name` | | pressure-gauge-detection | Lambda関数名 |
-| `--text` | | この圧力計のメーターを読み取ってください。針が指している値を教えてください。 | 解析リクエストテキスト |
+| `--user-prompt` | | ./user_prompt.txt | ユーザープロンプトファイル |
+| `--system-prompt` | | ./system_prompt.txt | システムプロンプトファイル |
+| `--no-preprocess` | | False | 画像の前処理をスキップする |
 | `--output-dir` | | ./output | 出力ディレクトリ |
 | `--region` | | us-east-1 | AWSリージョン |
 
